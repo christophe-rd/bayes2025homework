@@ -1,0 +1,561 @@
+---
+title: "Homework1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+## Started 16 January 2025 ##
+## By Daniel Forrest ##
+
+## Homework 1 for Bayes Class FRST 507C
+
+### simulating various data configurations and estimating the data parameters using Bayesian linear models
+
+# housekeeping
+rm(list=ls()) 
+options(stringsAsFactors=FALSE)
+
+#read libraries
+library(rstanarm)
+library(here)
+library(rstan)
+####
+here()
+```
+
+<> 1 -- Simulate data for a linear regression problem (continuous predictor and response variables) of your choice and show a linear model can return the parameters you set. Your n should be 100 and you should set your error (sigma) to a level you would expect in an ecological or evolutionary biology study.
+
+<> Lizzie, in this block, I simulate all data necessary for the full set of prompts
+
+```{r}
+# Set seed for reproducibility
+set.seed(42)
+
+# Simulation parameters
+#create params
+n = 100 # number of observations
+a = 5 #intercept
+b1 = 6 #effect size 1
+b2 = -2 # effect size 2
+b3 = 3 # effect size of interaction (half of b1 = 1.5)
+# simulate predictor variables
+x1 <- rnorm(n, 25, 12.5) # approximating temp in degrees C
+x2 <- rbinom(n, 1, 0.5) # binary var: males and females, where males are more likely to positively covary with higher temps
+sigma = 20
+
+sigma2 = 10
+
+# Simulate response variable (e.g., species abundance)
+# Linear relationship: y = a+ beta_1 * x + error
+yobs <- a + b1*x1 + rnorm(n, mean = 0, sd = sigma) ## simulating some species abundance (e.g., black-capped chickadees in Vancouver)
+yobs2 <- a + b1*x1 + rnorm(n, mean = 0, sd = sigma2) ## simulating some species abundance (e.g., black-capped chickadees in Vancouver)
+
+## center and scale predictors and response (i.e., z-score)
+dat <- data.frame(x1, x2, yobs, yobs2)
+dat.scaled <- as.data.frame(scale(dat))
+
+# back to vectors
+x1 <- dat$x1
+x2 <- dat$x2
+yobs <- dat$yobs
+yobs2 <- dat$yobs2
+
+```
+
+Here is where I fit the linear model to estimate my original parameters, using rstan, generated using model1.stan
+
+```{r}
+# Prepare data for Stan
+stan_data1 <- list(
+  N = n,
+  x = x1,
+  y = yobs
+)
+# run stan model
+fit1 <-stan(here("src","model1.stan"), 
+              data = c(stan_data1),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+
+
+```
+
+Here I compare model estimates to true parameters. The coefficient for predictor 1 ("beta1") and sigma are fairly close, while the intercept is a bit far off.
+
+```{r}
+
+summary_fit <- summary(fit1, pars = c("a", "beta1", "sigma"))$summary
+
+a_mean <- summary_fit["a", "mean"]
+beta1_mean <- summary_fit["beta1", "mean"]
+sigma_mean <- summary_fit["sigma", "mean"]
+
+# Compare true parameters with estimated parameters
+cat("True intercept (a):", a, "\n")
+cat("Estimated intercept:", a_mean, "\n")
+cat("True slope (b1):", b1, "\n")
+cat("Estimated slope:", beta1_mean, "\n")
+cat("True error standard deviation (sigma):", sigma, "\n")
+cat("Residual standard error:", sigma_mean, "\n")
+```
+
+Now I add the binary covariate, "x2" and simulate using the stan script, "model2.stan"
+```{r}
+# Prepare data for Stan
+stan_data2 <- list(
+  N = n,
+  x1 = x1,
+  x2 = x2,
+  y = yobs
+)
+# run stan model
+fit2 <-stan(here("src","model2.stan"), 
+              data = c(stan_data2),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+```
+
+And again, I check the estimated parameters vs. the true parameters. Here, the intercept estimate has improved, first predictor coefficient (~temperature, "x1") is very close, but the second ("x2") and third ("x1:x2") predictors are still well off. Sigma was fairly well estimated.
+```{r}
+
+summary_fit <- summary(fit2, pars = c("a", "b1", "b2","b3", "sigma"))$summary
+
+a_mean <- summary_fit["a", "mean"]
+b1_mean <- summary_fit["b1", "mean"]
+b2_mean <- summary_fit["b2", "mean"]
+b3_mean <- summary_fit["b3", "mean"]
+sigma_mean <- summary_fit["sigma", "mean"]
+
+# Compare true parameters with estimated parameters
+cat("True intercept (a):", a, "\n")
+cat("Estimated intercept:", a_mean, "\n")
+cat("True slope (b1):", b1, "\n")
+cat("Estimated slope:", b1_mean, "\n")
+cat("True slope (b1):", b2, "\n")
+cat("Estimated slope:", b2_mean, "\n")
+cat("True slope (b1):", b3, "\n")
+cat("Estimated slope:", b3_mean, "\n")
+cat("True error standard deviation (sigma):", sigma, "\n")
+cat("Residual standard error:", sigma_mean, "\n")
+```
+
+Here I sample just 20% of my data and re-format for stan.
+```{r}
+# Take a random 20% sample
+set.seed(42)  # For reproducibility
+
+# Select 20 random row indices
+row_indices <- sample(1:100, 20)
+
+# Subset each element based on its type
+stan_data3 <- lapply(stan_data2[2:4], function(x) {
+  if (is.data.frame(x) || is.matrix(x)) {
+    x[row_indices, , drop = FALSE]  # Subset for data frames or matrices
+  } else if (is.vector(x)) {
+    x[row_indices]  # Subset for vectors
+  } else {
+    stop("Unsupported data type in list")  # Error handling for unsupported types
+  }
+})
+
+n = 20
+
+stan_data3 <- c(list(N=n), stan_data3)
+
+```
+
+And here I fit the same model as above, but with only 20% of the data
+
+```{r}
+# run stan model
+fit3 <-stan(here("src","model2.stan"), 
+              data = c(stan_data3),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+```
+
+
+Now, more of the estimated parameters are far off. The model has only 1/5 of the information to work with, and therefore, a different model solution could generate similar patterns as the data, due to the low sample size and variation (i.e., noise, i.e., error).
+
+```{r}
+summary_fit <- summary(fit3, pars = c("a", "b1", "b2","b3", "sigma"))$summary
+
+a_mean <- summary_fit["a", "mean"]
+b1_mean <- summary_fit["b1", "mean"]
+b2_mean <- summary_fit["b2", "mean"]
+b3_mean <- summary_fit["b3", "mean"]
+sigma_mean <- summary_fit["sigma", "mean"]
+
+# Compare true parameters with estimated parameters
+cat("True intercept (a):", a, "\n")
+cat("Estimated intercept:", a_mean, "\n")
+cat("True slope (b1):", b1, "\n")
+cat("Estimated slope:", b1_mean, "\n")
+cat("True slope (b1):", b2, "\n")
+cat("Estimated slope:", b2_mean, "\n")
+cat("True slope (b1):", b3, "\n")
+cat("Estimated slope:", b3_mean, "\n")
+cat("True error standard deviation (sigma):", sigma, "\n")
+cat("Residual standard error:", sigma_mean, "\n")
+```
+Prompt: "Next, let's make a plot of sampling from your data from 1 to the n of your data (100) showing the estimated parameters for each sample size. Make a plot with your 1:100 on the horizontal axis and your estimated parameters on the vertical (you need either as many plots as parameters or a way to show all the different parameters on one plot). Compare how well the model does across the different parameters. Which is better or worse at and why?"
+
+Answer: Below, I create a function that can generate all of the models requested above. I chose to run 9 models from 20 to 100 samples, using a step size of 10. I tried models at smaller sample size (5, 10), and neither converged (i.e., not enough information to avoid divergent transitions in the MCMC sampler). Overall, model estimation improves as sample size increases, though not without some variation, and the interaction term is. The greater number of samples provides the model sampler more information to estimate the parameter space. However, given the error term (approximating variation in real ecological data, for example), it has not yet approached a very close fitting model. We could improve model fit by either increasing sample size, or decreasing sigma. We can consider this as a factor in our experimental design (can we increase sample size/acquire more data, or do we face major limitations?) and interpretation of our models (do we have sufficient sample size to detect a trend? Is the variation too great to detect a relationship? Can we accept/reject the null hypothesis in light of this info.?)  
+
+
+
+```{r}
+n = 100
+
+fit_objects <- list()
+
+# Function to fit model for varying sample sizes
+fit_varying_samples_stan <- function(n_subsample, n_reps = 1) {
+  estimates <- matrix(NA, nrow = n_reps, ncol = 5)  # For beta0, beta1, beta2, beta3
+  colnames(estimates) <- c("a", "b1", "b2", "b3", "sigma")
+  
+  for (rep in 1:n_reps) {
+    sample_indices <- sample(1:n, size = n_subsample)
+    stan_data_sample <- list(
+      N = length(sample_indices),
+      x1 = x1[sample_indices],
+      x2 = x2[sample_indices],
+      y = yobs[sample_indices]
+    )
+  
+    # run stan model
+    fit <-stan(here("src","model2.stan"), 
+              data = c(stan_data_sample),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+    fit_objects[[rep]] <- fit
+    estimates[rep, ] <- summary(fit)$summary[c("a", "b1", "b2", "b3", "sigma"), "mean"]
+  }
+  
+  colMeans(estimates)  # Average estimates across reps
+}
+
+
+# Compute estimates for sample sizes 1 to 100
+n_reps <- 1  # Single draw for now
+sample_sizes <- c(20,30,40,50,60,70,80,90,100) #could not converge with 5, nor 10 samples
+fit_results <- lapply(sample_sizes, fit_varying_samples_stan, n_reps = n_reps)
+print(fit_results)
+
+a_coef <- c()
+b1_coef <- c()
+b2_coef <- c()
+b3_coef <- c()
+sigma_coef <- c()
+for (i in 1:9){
+  a_coef[i] <- fit_results[[i]]["a"]
+  b1_coef[i] <- fit_results[[i]]["b1"]
+  b2_coef[i] <- fit_results[[i]]["b2"]
+  b3_coef[i] <- fit_results[[i]]["b3"]
+  sigma_coef[i] <- fit_results[[i]]["sigma"]
+}
+
+# Plot parameter estimates
+plot(sample_sizes, a_coef, type = "l", col = "blue", ylim = range(a_coef, a),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Alpha: Parameter Estimates vs. Sample Size")+ abline(h = a, col = "red", lty = 2)
+
+plot(sample_sizes, b1_coef, type = "l", col = "blue", ylim = range(b1_coef, b1),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 1: Parameter Estimates vs. Sample Size")+ abline(h = b1, col = "red", lty = 2)
+
+plot(sample_sizes, b2_coef, type = "l", col = "blue", ylim = range(b2_coef, b2),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 2: Parameter Estimates vs. Sample Size")+ abline(h = b2, col = "red", lty = 2)
+
+
+plot(sample_sizes, b3_coef, type = "l", col = "blue", ylim = range(b3_coef, b3),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 3: Parameter Estimates vs. Sample Size")+ abline(h = b3, col = "red", lty = 2)
+
+plot(sample_sizes, sigma_coef, type = "l", col = "blue", ylim = range(sigma_coef, sigma),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Sigma: Parameter Estimates vs. Sample Size")+ abline(h = sigma, col = "red", lty = 2)
+
+```
+
+Prompt: Let's improve our sampling now. So far we have take just ONE draw from our set of parameters which means our sigma term has some Monte Carlo error in it, so let's take 10 draws each time (so we need to set up a loop or such in R that samples from 1:n and at each step it repeats simulating the data and getting the estimates 10 times). Re-make your plot. (If you get stuck here for a while, don't panic, but move onto Steps 3-4.)
+
+Answer: Here, I increase the number of replicates of the model estimates to 10. I explore the averaged parameter estimates in the plots below. This appears to have reduced some of the variation seen across sample sizes, stabilizing model outputs. 
+
+```{r}
+
+fit_objects <- list()
+
+# Function to fit model for varying sample sizes
+fit_varying_samples_stan <- function(n_subsample, n_reps = 10) {
+  estimates <- matrix(NA, nrow = n_reps, ncol = 5)  # For beta0, beta1, beta2, beta3
+  colnames(estimates) <- c("a", "b1", "b2", "b3", "sigma")
+  
+  for (rep in 1:n_reps) {
+    sample_indices <- sample(1:n, size = n_subsample)
+    stan_data_sample <- list(
+      N = length(sample_indices),
+      x1 = x1[sample_indices],
+      x2 = x2[sample_indices],
+      y = yobs[sample_indices]
+    )
+  
+    # run stan model
+    fit <-stan(here("src","model2.stan"), 
+              data = c(stan_data_sample),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+    fit_objects[[rep]] <- fit
+    estimates[rep, ] <- summary(fit)$summary[c("a", "b1", "b2", "b3", "sigma"), "mean"]
+  }
+  
+  colMeans(estimates)  # Average estimates across reps
+}
+
+
+# Compute estimates for sample sizes 1 to 100
+sample_sizes <- c(20,30,40,50,60,70,80,90,100) #could not converge with 5, nor 10 samples
+fit_results <- lapply(sample_sizes, fit_varying_samples_stan, n_reps = n_reps)
+print(fit_results)
+
+a_coef <- c()
+b1_coef <- c()
+b2_coef <- c()
+b3_coef <- c()
+sigma_coef <- c()
+for (i in 1:9){
+  a_coef[i] <- fit_results[[i]]["a"]
+  b1_coef[i] <- fit_results[[i]]["b1"]
+  b2_coef[i] <- fit_results[[i]]["b2"]
+  b3_coef[i] <- fit_results[[i]]["b3"]
+  sigma_coef[i] <- fit_results[[i]]["sigma"]
+}
+
+# Plot parameter estimates
+plot(sample_sizes, a_coef, type = "l", col = "blue", ylim = range(a_coef, a),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Alpha: Parameter Estimates vs. Sample Size")+ abline(h = a, col = "red", lty = 2)
+
+plot(sample_sizes, b1_coef, type = "l", col = "blue", ylim = range(b1_coef, b1),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 1: Parameter Estimates vs. Sample Size")+ abline(h = b1, col = "red", lty = 2)
+
+plot(sample_sizes, b2_coef, type = "l", col = "blue", ylim = range(b2_coef, b2),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 2: Parameter Estimates vs. Sample Size")+ abline(h = b2, col = "red", lty = 2)
+
+
+plot(sample_sizes, b3_coef, type = "l", col = "blue", ylim = range(b3_coef, b3),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 3: Parameter Estimates vs. Sample Size")+ abline(h = b3, col = "red", lty = 2)
+
+plot(sample_sizes, sigma_coef, type = "l", col = "blue", ylim = range(sigma_coef, sigma),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Sigma: Parameter Estimates vs. Sample Size")+ abline(h = sigma, col = "red", lty = 2)
+
+
+```
+
+Here, I use yobs2, which is the response variable that results from using original sigma divided by 2 (from 20 to 10). This has improved our coefficient estimates, overall, across all sample sizes, as the data were less varied about the mean. 
+
+```{r}
+
+fit_objects <- list()
+
+# Function to fit model for varying sample sizes
+fit_varying_samples_stan <- function(n_subsample, n_reps = 10) {
+  estimates <- matrix(NA, nrow = n_reps, ncol = 5)  # For beta0, beta1, beta2, beta3
+  colnames(estimates) <- c("a", "b1", "b2", "b3", "sigma")
+  
+  for (rep in 1:n_reps) {
+    sample_indices <- sample(1:n, size = n_subsample)
+    stan_data_sample <- list(
+      N = length(sample_indices),
+      x1 = x1[sample_indices],
+      x2 = x2[sample_indices],
+      y = yobs2[sample_indices]
+    )
+  
+    # run stan model
+    fit <-stan(here("src","model2.stan"), 
+              data = c(stan_data_sample),
+             chains = 4, iter = 2000, save_warmup=FALSE,
+             #seed = 1, control=list(adapt_delta=0.9),
+             init_r=1)
+    fit_objects[[rep]] <- fit
+    estimates[rep, ] <- summary(fit)$summary[c("a", "b1", "b2", "b3", "sigma"), "mean"]
+  }
+  
+  colMeans(estimates)  # Average estimates across reps
+}
+
+
+# Compute estimates for sample sizes 1 to 100
+sample_sizes <- c(20,30,40,50,60,70,80,90,100) #could not converge with 5, nor 10 samples
+fit_results <- lapply(sample_sizes, fit_varying_samples_stan, n_reps = n_reps)
+print(fit_results)
+
+a_coef <- c()
+b1_coef <- c()
+b2_coef <- c()
+b3_coef <- c()
+sigma_coef <- c()
+for (i in 1:9){
+  a_coef[i] <- fit_results[[i]]["a"]
+  b1_coef[i] <- fit_results[[i]]["b1"]
+  b2_coef[i] <- fit_results[[i]]["b2"]
+  b3_coef[i] <- fit_results[[i]]["b3"]
+  sigma_coef[i] <- fit_results[[i]]["sigma"]
+}
+
+# Plot parameter estimates
+plot(sample_sizes, a_coef, type = "l", col = "blue", ylim = range(a_coef, a),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Alpha: Parameter Estimates vs. Sample Size")+ abline(h = a, col = "red", lty = 2)
+
+plot(sample_sizes, b1_coef, type = "l", col = "blue", ylim = range(b1_coef, b1),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 1: Parameter Estimates vs. Sample Size")+ abline(h = b1, col = "red", lty = 2)
+
+plot(sample_sizes, b2_coef, type = "l", col = "blue", ylim = range(b2_coef, b2),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 2: Parameter Estimates vs. Sample Size")+ abline(h = b2, col = "red", lty = 2)
+
+
+plot(sample_sizes, b3_coef, type = "l", col = "blue", ylim = range(b3_coef, b3),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Beta 3: Parameter Estimates vs. Sample Size")+ abline(h = b3, col = "red", lty = 2)
+
+plot(sample_sizes, sigma_coef, type = "l", col = "blue", ylim = range(sigma_coef, sigma2),
+     xlab = "Sample Size", ylab = "Estimated Parameters", main = "Sigma: Parameter Estimates vs. Sample Size")+ abline(h = sigma2, col = "red", lty = 2)
+
+
+
+```
+Beginning to work on Challenge C
+
+
+```{r}
+# 
+# 
+# 
+# fit_varying_samples_stan <- function(n_subsample, n_reps = 10) {
+#   fit_objects <- list()  # Create a local list
+#   estimates <- matrix(NA, nrow = n_reps, ncol = 5)  # For beta0, beta1, beta2, beta3
+#   colnames(estimates) <- c("a", "b1", "b2", "b3", "sigma")
+#   
+#   for (rep in 1:n_reps) {
+#     sample_indices <- sample(1:n, size = n_subsample)
+#     stan_data_sample <- list(
+#       N = length(sample_indices),
+#       x1 = x1[sample_indices],
+#       x2 = x2[sample_indices],
+#       y = yobs2[sample_indices]
+#     )
+#   
+#     # Run Stan model
+#     fit <- stan(here("src", "model2.stan"), 
+#                 data = c(stan_data_sample),
+#                 chains = 4, iter = 2000, save_warmup = FALSE,
+#                 init_r = 1)
+#     fit_objects[[rep]] <- fit
+#     estimates[rep, ] <- summary(fit)$summary[c("a", "b1", "b2", "b3", "sigma"), "mean"]
+#   }
+#   
+#   return(fit_objects)  # Return the list of Stan model objects
+# }
+# 
+# sample_sizes <- c(20,30,40,50,60,70,80,90,100) #could not converge with 5, nor 10 samples
+# fit_results <- lapply(sample_sizes, fit_varying_samples_stan, n_reps = n_reps)
+# print(fit_results)
+# 
+# 
+# 
+# # Set a seed for replicability
+# set.seed(1234)
+# 
+# #### CHANGE THESE FOR EACH MODEL
+# # Extract posterior samples
+# 
+# 
+# # Create an empty list to store posterior samples
+# posterior_samples <- vector("list", length(fit_results))
+# 
+# # Loop through each stanfit object in the list
+# for (i in seq_along(fit_results)) {
+#   # Extract the stanfit object from the nested list
+#   stanfit_object <- fit_results[[i]][[1]]  # Assuming the stanfit object is the first element
+#   posterior_samples[[i]] <- rstan::extract(stanfit_object)
+# }
+# 
+# for (i in seq_along(posterior_samples)){
+#  posterior_samples[[i]]$a
+# }
+# 
+# # Extract necessary parameters
+# N_rep <- posterior_samples$N
+# p_rep <- posterior_samples$p
+# 
+# # Define the number of draws for visualization
+# num_draws <- 50
+# draw_indices <- sample(seq_len(nrow(N_rep)), num_draws)
+# 
+# 
+# pp_data <- vector("list", num_draws)
+# 
+# # Generate new samples
+# for (i in seq_along(draw_indices)) {
+#   draw_index <- draw_indices[i]
+#   N_draw <- N_rep[draw_index, ]  # 1x11
+#   p_draw <- p_rep[draw_index]    # single value
+#   
+#   # Generate a new 4x11 sample using the binomial distribution
+#   pp_data[[i]] <- matrix(rbinom(4 * 11, size = N_draw, prob = p_draw), nrow = 4, ncol = 11)
+# }
+# 
+# # Flatten the observed data if it's not already a vector
+# if (!is.vector(y)) {
+#   y <- c(y)
+# }
+# 
+# # Combine the posterior predictive data into a single data frame
+# num_draws <- length(pp_data)
+# 
+# # Convert each draw to a data frame with a draw identifier
+# posterior_data <- do.call(rbind, lapply(seq_along(pp_data), function(i) {
+#   data.frame(value = c(pp_data[[i]]), draw = paste("Posterior Draw", i), type = "Posterior samples")
+# }))
+# 
+# # Create a data frame for the observed data
+# observed_data <- data.frame(value = y, draw = 'Observed', type = 'Observed')
+# 
+# # Combine the data for ggplot
+# combined_data <- bind_rows(observed_data, posterior_data)
+# 
+# smoothing <- 1
+# # Define colors with alpha transparency
+# alpha_red <- scales::alpha("red", 0.4)
+# 
+# # Plot using ggplot2
+# ppcplot <- ggplot(combined_data, aes(x = value, color = type)) +
+#   # Plot posterior predictive data
+#   geom_density(data = subset(combined_data, type == "Posterior samples"), bw = smoothing, 
+#                aes(group = draw, color = type), 
+#                size = 0.7) +
+#   # Plot observed data
+#   geom_density(data = subset(combined_data, type == "Observed"), bw = smoothing, 
+#                aes(color = type), 
+#                size = 1.5) +
+#   # Set manual colors and labels
+#   scale_color_manual(values = c("Observed" = "blue", "Posterior samples" = alpha_red), 
+#                      labels = c("Observed" = "Observed", "Posterior samples" = "Posterior samples")) +
+#   # Set plot labels and title
+#   labs(title = "Posterior Predictive Check",
+#        x = "Value",
+#        y = "Density",
+#        color = "Type") +
+#   # Set theme
+#   theme_minimal() +
+#   theme(legend.position = "top") +
+#   # Set legend guide overrides
+#   guides(color = guide_legend(override.aes = list(size = 2)))
+# 
+# print(ppcplot)
+```
+

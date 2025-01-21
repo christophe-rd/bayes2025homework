@@ -1,0 +1,292 @@
+---
+title: "Homework 1"
+author: "Mao"
+format: html
+editor: visual
+---
+
+For some reason, my models took too long to run when I set the maximum sample size to 100. I'm not sure whether I misunderstood the question and didn't write the code correctly or if it's an issue with my laptop. Instead, I ran the models with a maximum sample size of 20 and answered the questions based on what I expected the results to look like, since the results I got with a sample size of 20 didn't match my expectations. I didn't compile the qmd file for the same reason. Maybe it is just my laptop.
+
+## Part 1
+
+The example I come up with for the linear regression is the plant height versus fertilizer concentration.
+
+## Step 1
+
+Reasonable domain for x (fertilizer concentration): 0\<= x\<=20 g/L
+
+Reasonable domain for y (plant height): 0\<=y\<=40 cm
+
+```{r message=FALSE}
+library(rstanarm)
+library(ggplot2)
+options(mc.cores = parallel::detectCores())
+```
+
+```{r warning=FALSE}
+set.seed(27)
+# Define sample size
+n <- 100
+# Define parameters
+a <- 5
+b1 <- 1.5
+sigmasq <- 4
+
+# Draw x randomly
+x1 <- runif(n,min=1,max=20)
+# simulate errors
+errors <- rnorm(n,0,sigmasq)
+# Simulate y from the function
+yobs1 <- a+b1*x1+errors
+
+# Use rstanarm pacakge
+m1 <- stan_glm(yobs1~x1,refresh=0)
+coef(m1)
+```
+
+Add in a water stress treatment and the interaction
+
+```{r warning=FALSE}
+b2 <- -0.5
+b3 <- 0.75
+x2 <- rbinom(n,1,prob=0.5)
+
+yobs2 <- a+b1*x1+b2*x2+b3*x1*x2+errors
+
+m2 <- stan_glm(yobs2~x1*x2,refresh=0)
+coef(m2)
+```
+
+The b2 is pretty off, but intercept, b1 and b3 are relatively accurate.
+
+## Step 2
+
+```{r warning=FALSE}
+# Define new sample size
+n <- 20
+
+# Draw x randomly
+x3 <- runif(n,min=1,max=20)
+x4 <- rbinom(n,1,prob=0.5)
+
+# simulate errors
+errors2 <- rnorm(n,0,sigmasq)
+
+yobs3 <- a+b1*x3+b2*x4+b3*x3*x4+errors2
+
+m3 <- stan_glm(yobs3~x3*x4,refresh=0)
+coef(m3)
+```
+
+The parameter estimates are more accurate compared to when sample size is bigger...
+
+```{r warning=FALSE}
+# n should be 100 but it took too long to run on my laptop for some reason, so I use 20 instead, which might be the reason why my results are different from my expectation.
+n<-20
+a_estimates <- numeric(n)
+b1_estimates <- numeric(n)
+b2_estimates <- numeric(n)
+b3_estimates <- numeric(n)
+# loop through sample sizes from 1 to 100
+for (i in 2:n){
+  x1_subset <- x1[1:i]
+  x2_subset <- x2[1:i]
+  errors_subset <- errors[1:i]
+ yobs2 <- a+b1*x1_subset+b2*x2_subset+b3*x1_subset*x2_subset+errors_subset
+    m4 <- stan_glm(yobs2 ~ x1_subset*x2_subset, refresh = 0)
+  a_estimates[i] <- coef(m4)[1]
+  b1_estimates[i] <- coef(m4)[2]
+  b2_estimates[i] <- coef(m4)[3]
+  b3_estimates[i] <- coef(m4)[4]
+}
+samplesize <- 1:20
+plot(samplesize, a_estimates, type = "l", col = "blue", lwd = 2,
+     xlab = "Sample size", ylab = "Parameter estimate",
+     main = "Parameter estimates versus increasing sample size")
+lines(samplesize, b1_estimates, col = "green", lwd = 2)
+lines(samplesize, b2_estimates, col = "red", lwd = 2)
+lines(samplesize, b3_estimates, col = "purple", lwd = 2)
+legend("topright", legend = c("Intercept", "b1", "b2", "b3"),
+       col = c("blue", "green", "red", "purple"), lwd = 2, cex = 0.8)
+
+```
+
+I would expect the interaction term b3​ to be less accurate when the sample size is small, as adding the interaction term increases the model's complexity. However, my results show that the intercept and b2​ (treatment) coefficients are less precisely estimated when the sample size is small, while b1 is better estimated even with a small sample size, possibly due to its larger effect on the response variable.
+
+```{r warning=FALSE}
+a_estimates <- matrix(NA, nrow = n, ncol = 10)
+b1_estimates <- matrix(NA, nrow = n, ncol = 10)
+b2_estimates <- matrix(NA, nrow = n, ncol = 10)
+b3_estimates <- matrix(NA, nrow = n, ncol = 10)
+# loop through sample sizes from 1 to 100, at each sample size run the model 10 times
+for (i in 2:n) {
+  x1_sub <- x1[1:i]
+  x2_sub <- x2[1:i]
+  errors_sub <- errors[1:i]
+  for (j in 1:10) {
+    yobs <- a+b1*x1_sub+b2*x2_sub+b3*x1_sub*x2_sub+errors_sub
+    m5 <- stan_glm(yobs ~ x1_sub*x2_sub, refresh = 0)
+    a_estimates[i, j] <- coef(m5)[1]
+    b1_estimates[i, j] <- coef(m5)[2]
+    b2_estimates[i, j] <- coef(m5)[3]
+    b3_estimates[i, j] <- coef(m5)[4]
+  }
+}
+```
+
+```{r}
+
+plot(1:n, a_estimates[,1], col = "blue", xlab = "Sample size", ylab = "Parameter estimate", ylim = c(-10,15),
+     main = "Parameter estimates versus increasing sample size")
+
+for (j in 1:10) {
+  points(1:n, a_estimates[,j], col = "blue", pch = 16)
+}
+for (j in 1:10) {
+  points(1:n, b1_estimates[,j], col = "green", pch = 17) 
+}
+for (j in 1:10) {
+  points(1:n, b2_estimates[,j], col = "red", pch = 18) 
+}
+for (j in 1:10) {
+  points(1:n, b3_estimates[,j], col = "purple", pch = 19) 
+}
+legend("bottomright", legend = c("Intercept", "b1", "b2", "b3"),
+       col = c("blue", "green", "red", "purple"), pch = c(16, 17, 18, 19))
+# Real intercetp:5
+# Real b1: 1.5
+# Real b2: -0.5
+# Real b3: 0.75
+```
+
+## Step 3
+
+```{r warning=FALSE}
+# increase the error
+sigmasq <- 6
+errors3 <- rnorm(n,0,sigmasq)
+a_estimates <- matrix(NA, nrow = n, ncol = 10)
+b1_estimates <- matrix(NA, nrow = n, ncol = 10)
+b2_estimates <- matrix(NA, nrow = n, ncol = 10)
+b3_estimates <- matrix(NA, nrow = n, ncol = 10)
+
+for (i in 2:n) {
+  x1_sub <- x1[1:i]
+  x2_sub <- x2[1:i]
+  errors3_sub <- errors3[1:i]
+   for (j in 1:10) {
+    yobs <- a+b1*x1_sub+b2*x2_sub+b3*x1_sub*x2_sub+errors3_sub
+    m6 <- stan_glm(yobs ~ x1_sub*x2_sub, refresh = 0)
+    a_estimates[i, j] <- coef(m6)[1]
+    b1_estimates[i, j] <- coef(m6)[2]
+    b2_estimates[i, j] <- coef(m6)[3]
+    b3_estimates[i, j] <- coef(m6)[4]
+  }
+}
+```
+
+```{r}
+plot(1:n, a_estimates[,1], col = "blue", xlab = "Sample size", ylab = "Parameter estimate", ylim = c(-10,15),
+     main = "Parameter estimates versus increasing sample size")
+
+for (j in 1:10) {
+  points(1:n, a_estimates[,j], col = "blue", pch = 16)
+}
+for (j in 1:10) {
+  points(1:n, b1_estimates[,j], col = "green", pch = 17) 
+}
+for (j in 1:10) {
+  points(1:n, b2_estimates[,j], col = "red", pch = 18) 
+}
+for (j in 1:10) {
+  points(1:n, b3_estimates[,j], col = "purple", pch = 19) 
+}
+legend("bottomright", legend = c("Intercept", "b1", "b2", "b3"),
+       col = c("blue", "green", "red", "purple"), pch = c(16, 17, 18, 19))
+# Real intercetp:5
+# Real b1: 1.5
+# Real b2: -0.5
+# Real b3: 0.75
+```
+
+Increasing the error term introduces more noise into the model, which should make the parameter estimates less precise. However, if the effect sizes are strong enough to stand out from the noise, we can still get relatively accurate parameter estimates, even with increased noise when the sample size is large enough. I got the opposite results though, which I don't fully understand...
+
+## Challenge B
+
+```{r warning=FALSE}
+n <- 100
+a <- 5
+b1 <- 1.5
+b2 <- -0.5
+b3 <- 0.25 
+b4 <- 0.75       
+b5 <- 0.5
+b6 <- 0.5
+b7 <- 0.5
+sigmasq <- 2
+
+x1 <- runif(n,min=1,max=20)
+x2 <- rbinom(n,1,prob=0.5)
+x3 <- rbinom(n,1,prob=0.5)
+errors <- rnorm(n,0,sigmasq)
+a_estimates <- matrix(NA, nrow = n, ncol = 10)
+b1_estimates <- matrix(NA, nrow = n, ncol = 10)
+b2_estimates <- matrix(NA, nrow = n, ncol = 10)
+b3_estimates <- matrix(NA, nrow = n, ncol = 10)
+b4_estimates <- matrix(NA, nrow = n, ncol = 10)
+b5_estimates <- matrix(NA, nrow = n, ncol = 10)
+b6_estimates <- matrix(NA, nrow = n, ncol = 10)
+b7_estimates <- matrix(NA, nrow = n, ncol = 10)
+
+for (i in 2:n) {
+
+  x1_sub <- x1[1:i]
+  x2_sub <- x2[1:i]
+  x3_sub <- x3[1:i]
+  errors_sub <- errors[1:i]
+  
+
+  for (j in 1:10) {
+  yobs <- a+b1*x1_sub+b2*x2_sub+b3*x3_sub+b4*x1_sub*x2_sub+b5*x1_sub*x3_sub+b6*x2_sub*x3_sub+b7*x1_sub*x2_sub*x3_sub+errors_sub
+    m7 <- stan_glm(yobs~x1_sub*x2_sub*x3_sub, refresh = 0)
+    a_estimates[i, j] <- coef(m7)[1]
+    b1_estimates[i, j] <- coef(m7)[2]
+    b2_estimates[i, j] <- coef(m7)[3]
+    b3_estimates[i, j] <- coef(m7)[4]
+    b4_estimates[i, j] <- coef(m7)[5]
+    b5_estimates[i, j] <- coef(m7)[6]
+    b6_estimates[i, j] <- coef(m7)[7]
+    b7_estimates[i, j] <- coef(m7)[8]
+  }
+}
+
+plot(1:n, a_estimates[,1], col = "blue", xlab = "Sample size", ylab = "Parameter estimate", ylim = c(-10,15),
+     main = "Parameter estimates versus increasing sample size")
+for (j in 1:10) {
+  points(1:n, a_estimates[,j], col = "blue", pch = 16)
+}
+for (j in 1:10) {
+  points(1:n, b1_estimates[,j], col = "green", pch = 17) 
+}
+for (j in 1:10) {
+  points(1:n, b2_estimates[,j], col = "red", pch = 18) 
+}
+for (j in 1:10) {
+  points(1:n, b3_estimates[,j], col = "purple", pch = 19) 
+}
+for (j in 1:10) {
+  points(1:n, b4_estimates[,j], col = "brown", pch = 20) 
+}
+for (j in 1:10) {
+  points(1:n, b5_estimates[,j], col = "pink", pch = 21) 
+}
+for (j in 1:10) {
+  points(1:n, b6_estimates[,j], col = "yellow", pch = 22) 
+}
+for (j in 1:10) {
+  points(1:n, b7_estimates[,j], col = "navy", pch = 23) 
+}
+legend("bottomright", legend = c("Intercept", "b1", "b2", "b3", "b4", "b5", "b6", "b7"),
+       col = colors, pch = c(16, 17, 18, 19, 20, 21, 22, 23))
+
+```
