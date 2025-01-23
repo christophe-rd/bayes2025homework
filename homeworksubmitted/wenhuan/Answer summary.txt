@@ -1,0 +1,37 @@
+Thanks for you lecture, it's interesting and informative. Here I attached my R code and figure outputs for assignment1. Below I summaried my observations and output notes.
+
+1. Assignment Observations
+I conducted the assignment using four different levels of sigma (σ), specifically sd=3,6,9,18\text{sd} = 3, 6, 9, 18sd=3,6,9,18.
+For each level, I performed 10 replications, resulting in a total of 8 plots (single draw and 10 replicates for each sigma).
+Output filenames: parameter_estimates_sd3(6,9,18).tiff, and their respective 10-replication versions.
+
+Findings:
+For sd=18, 10 replications clearly allowed parameter estimates to stabilize more quickly compared to a single draw.
+For sd<18, no significant difference was observed between a single draw and 10 replications in terms of stability.
+
+2. Challenge Observations
+
+Challenge A: Dummy Variable Model
+I implemented a dummy variable approach for categorical treatment levels.
+Output filename: parameter_estimates_dummy_variable.tiff.
+
+Findings:
+With 10 replicates, parameter estimates achieved stability faster compared to using a single model.
+
+
+Challenge B: Full Factorial Model with Two Treatments
+I implemented a full factorial model involving two treatments.
+Output filenames: parameter_estimates_full_factorial.tiff and its replicates.
+
+Findings:
+For the two-treatment model, there was no obvious difference in stability between a single sample and 10 replicates.
+
+
+Challenge C: Uncertainty Analysis
+I analyzed parameter uncertainty by extracting 50% posterior uncertainty intervals.
+Output filename: uncertainty_intervals.tiff.
+
+Findings:
+Parameters related to the intercept and categorical variables exhibited larger uncertainty.
+This was consistent across the two-treatment model, where terms involving continuous variables showed smaller uncertainty.
+when the sample size> 30 or 40, 10 replcates lower uncertainty than single sample, and sd18 started showing lower uncertainty than sd9. 

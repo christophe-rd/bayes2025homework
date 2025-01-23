@@ -11,10 +11,11 @@ Step 2 -- Building on the above example, let's look at how the estimates of para
 
 Using just 20% of your data, see how well you can return the parameters you set.
 
-Next, let's make a plot of sampling from your data from 1 to the n of your data (100) showing the estimated parameters for each sample size. Make a plot with your 1:100 on the horizontal axis and your estimated parameters on the vertical (you need either as many plots as parameters or a way to show all the different parameters
+Next, let's make a plot of sampling from your data from a low sample size (e.g., 2 or 5) to the n of your data (100) showing the estimated parameters for each sample size (you do not need to sample by 1, so you can do, 5, 15 etc.). Make a plot with your 1:100 on the horizontal axis and your estimated parameters on the vertical (you need either as many plots as parameters or a way to show all the different parameters
  on one plot). Compare how well the model does across the different parameters. Which is better or worse at and why? 
 
-Let's improve our sampling now. So far we have take just ONE draw from our set of parameters which means our sigma term has some Monte Carlo error in it, so let's take 10 draws each time (so we need to set up a loop or such in R that samples from 1:n and _at each step it repeats simulating the data and getting the estimates 10 times_). Re-make your plot. (If you get stuck here for a while, don't panic, but move onto Steps 3-4.)
+[comment]: <> (Some people struggled on what I meant here, I updated it after the assignment but could use more work.)
+Let's improve our sampling now. So far we have take just ONE draw from our set of parameters which means our sigma term has some Monte Carlo error in it, so let's take 10 draws each time (so we need to set up a loop or such in R that samples from 1 (or 2 or 5 etc.) to 100 and _at each step it repeats simulating the data and getting the estimates 10 times_). Re-make your plot. (If you get stuck here for a while, don't panic, but move onto Steps 3-4.)
 
 Step 3 -- Now, repeat the above but change your error term by 50%. Compare these results to what you found before and explain why you think they changed. 
 
@@ -53,4 +54,5 @@ You can submit via Canvas or GitHub. To submit on GitHub:
 
 If you submit on Canvas, follow steps 1-2, then compress your folder and upload it via the assignment. 
 
-If you're auditing you don't have to submit your homework, but I still highly recommend doing it (it will test your skills in the course and make it easier for you to enjoy the homework review in class each week). You're welcome to submit your homework to me if you are auditing the course.  
+If you're auditing you don't have to submit your homework, but I still highly recommend doing it (it will test your skills in the course and make it easier for you to enjoy the homework review in class each week). You're welcome to submit your homework to me if you are auditing the course though please try to submit via one of the two methods above (I can add you to Canvas if you are auditing but need enough notice), because my email inbox is not a great place for homework.
+
