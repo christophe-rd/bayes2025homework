@@ -19,59 +19,68 @@ for( c in 4:13) {
 #I am predicting that there is going to be a generally linear relationship between swim speed and body mass
 #I also am predicting that both the minimum swim speed (intercept) and the influence of mass on speed (slope) will vary between species
 #Mass will be positively linearly related to wet mass
-#It does not make sense for either mass or swim speed to be negative, and both of these values are close to 0 in the data, so I will not be able to fit a normal distribution, I went with gamma instead.
-
-
-# Simulating data ---------------------------------------------------------
 
 #I want my simulated data to have the same number of grouping factors (species) as my real data
 nspecies <- length(unique(fastswim$species))
+
 #My real data does have more species with lower sample sizes, but I will ignore this for now
-n.per.sp <- round(runif(nspecies, 10, 50))
+n.per.sp <- round(runif(nspecies, min = 10, max = 50))
 hist(n.per.sp)
+
 #number of samples total
 n <- sum(n.per.sp)
+
+mu.alpha <- 10
+sig.alpha <- 3.5
+
+intspp <- rnorm(n, mu.alpha, sig.alpha)
+
+mu.beta <- 1.5
+sig.beta <- 0.9
+slopespp <- rnorm(n, mu.beta, sig.beta)
+
+#overall error
+sig.y <- 5
+
+# Simulating data ---------------------------------------------------------
+
 #create data frame
-sim.data <- data.frame(species = rep(1:nspecies, n.per.sp), 
-                       mass = NA,
-                       speed = NA)
-#species level parameters, setting the distributions for the intercepts and slopes of the model
-#It doen't make sense for my predicted speeds to be negative, so I am using a gamma distribution for intercept
-shape.alpha <- 40
-scale.alpha <- 0.3
-alphaspp <- rgamma(n, shape = shape.alpha, scale = scale.alpha)
-
-#However, I do want to allow the slope of speed and mass to potentially be negative, so I made this distribution normal
-mu.beta <- 0.8
-sig.beta <- 1
-betaspp <- rnorm(n, mu.beta, sig.beta)
-
-#overall variance in my predicted speeds
-scale.y <- 2
-
+sim.data <- data.frame(species = rep(1:nspecies, n.per.sp))
+sim.data$species <- as.factor(sim.data$species)
 #simulation group means and var, based on real max and mins of groups, I wanted each group to have its own internal distribution as this would be most similar to my actual data structure
 mass.means <- aggregate(fastswim$wetmass, list(fastswim$species), FUN = "mean")
-mass.var <- aggregate(fastswim$wetmass, list(fastswim$species), FUN = "var")
+mass.sd <- aggregate(fastswim$wetmass, list(fastswim$species), FUN = "sd")
 
 #For generating masses, I used the absolute value of my draws from rnorm
 #I realize this is increasing the means and decreasing the variance of my distributions somewhat, but it was a convenient way to prevent generating negative masses.
-  for(sp in 1:nspecies){
+for(sp in 1:nspecies){
   m <- mass.means$x[sp]
   d <- mass.sd$x[sp]
   sim.data$mass[sim.data$species == sp] <- abs(rnorm(n = n.per.sp[sp],m,d))
 }
-  for (o in 1:n){
-    sp <- sim.data$species[o]
-   yhat <- alphaspp[sp] + betaspp[sp]*sim.data$mass[o]
-    sim.data$speed[o] <- rgamma(1, yhat, scale.y)
-  }
+for (o in 1:n){
+  sp <- sim.data$species[o]
+  sim.data$ypred[o] <- intspp[sp] + slopespp[sp]*sim.data$mass[o]
+  sim.data$y[o] <- rnorm(1, sim.data$ypred[o], sig.y)
+}
+
 #compare my real and simulated data
-plot(fastswim$wetmass, fastswim$speed)
-plot(sim.data$mass, sim.data$speed)
+par(mfrow = c(2,1))
+plot(fastswim$wetmass, fastswim$speed, main = "real data")
+plot(sim.data$mass, sim.data$y, main = "simulated data")
 
 # Running the model on simulated data and assessing -----------------------
 
-speedfit <- stan_glmer(speed ~ mass|species,
-                     data = sim.data,
-                     family = Gamma(link = "identity"))
+testfit <- stan_lmer(y ~ mass|species,
+                       data = sim.data)
+
 summary(speedfit)
+
+launch_shinystan(speedfit)
+
+
+# Running the model on empirical data -------------------------------------
+
+realfit <- stan_lmer(speed ~ wetmass|species,
+                     data = fastswim,
+                     iter = 5000)
