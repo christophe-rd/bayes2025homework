@@ -1,0 +1,341 @@
+---
+title: "homework2"
+author: "Jenna Melanson"
+date: "2025-01-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#rm(list=ls())
+library(knitr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(rstanarm)
+library(truncnorm)
+library(rstan)
+library(bayesplot)
+knitr::opts_knit$set(root.dir = "/Users/jenna1/Documents/UBC/Coursework/bayesian_wolkovich/jenna/homework2")
+setwd("/Users/jenna1/Documents/UBC/Coursework/bayesian_wolkovich/jenna/homework2")
+options(stringsAsFactors = FALSE)
+
+#load in data
+carnivoreteeth = read.csv("carnivoreteeth.csv")
+carnivorebody  = read.csv("carnivorebodymass.csv")
+```
+
+## Instructions
+
+1) Come up with a model.
+
+2) Simulate test data for this model to both make sure you can get your set parameters back from your model (effectively, test your code) and understand better how your model performs.
+
+3) Set your priors and run some checks on them to make sure they conform with reality and you feel good about them (optional, or 5)
+
+4) Run your model on your empirical data.
+
+5) Perform retrodictive checks using the model fit to your empirical data and consider if that makes you want to change your model. (optional, or 3)
+
+Remember that you need well-running models at step 2 and 4 (no divergences, Rhat close to 1, good Neffective).
+
+
+## Define Question and Model Structure
+
+Question: How does tooth size vary with latitude (within species)?
+
+Model: tooth size (pm4 or canine) ~ (latitude|species)
+
+This model looks at intraspecific differences, but we can also modify it slightly to assess interspecific differences if we wanted to.
+
+
+## Explore the data
+```{r explore data, fig.show='hide'}
+complete_teeth = carnivoreteeth %>%
+  drop_na(CsupL) %>%
+  drop_na(Lat)
+
+#histogram of tooth size colored by species
+ggplot(complete_teeth, aes(x = CsupL, color = Species)) +
+  geom_histogram() +
+  theme(legend.position = "none")
+
+#histogram of average tooth size
+avgteeth = complete_teeth %>% group_by(Species) %>% summarize(avteeth = mean(CsupL))
+ggplot(avgteeth, aes(x = avteeth)) +
+  geom_histogram() +
+  theme(legend.position = "none")
+
+#histogram of latitude colored by species
+ggplot(complete_teeth, aes(x = Lat, color = Species)) +
+  geom_histogram() +
+  theme(legend.position = "none")
+
+#histogram of variation in latitude at species level
+lat_variation = complete_teeth %>% 
+  group_by(Species) %>% 
+  summarize(latvar = sd(Lat), 
+            latrange = max(Lat)-min(Lat))
+ggplot(lat_variation, aes(x = latrange)) +
+  geom_histogram() +
+  theme(legend.position = "none")
+
+#histogram of # of individuals per species
+complete_summary = complete_teeth %>% group_by(Species) %>% summarize(numobs = n())
+ggplot(complete_summary, aes(x = numobs)) +
+  geom_histogram() +
+  theme(legend.position = "none")
+```
+
+## A few observations...
+
+There are ~18,000 observations of 242 species, although species are not equally represented in the data set (some have many more osbservations than others). Most have <100 observations. Partial pooling on slopes will therefore be helpful, as it will allow variation between species responses while assigning more "weight" to species with more observations.
+
+When simulating data, we must ensure a couple of things:
+
+1) What we really care about is the absolute value of latitude (e.g., high positive latitude and high negative latitude should have similar effects on tooth/body size)
+
+2) Random draws for latitude should be clustered by species. e.g., taking a random draw of latitudes and randomly assigning them to species would result in very unrealistic data (e.g., global distributions of all species)
+
+3) Range size (degrees latitude) varies from 0-102, but most are in the range 0-75. We could simulate range size using an exponential distribution, e.g, rexp(Nspp, rate = 0.1)
+
+## Simulate data
+
+```{r, simulate data}
+#Sample size
+N = 1000
+Nspp = 25
+sigmay = 0.1
+
+#Parameters for simulating species intercepts
+Ameanspp = 5
+Asigmaspp = 1
+
+#Parameters for simulating species slopes
+Bmeanspp = 0.1 #this would be a LARGE effect (e.g., increase in tooth size by 9mm from equator to poles)
+Bsigmaspp = 0.05
+
+#Simulate species intercepts and slopes and bind into df
+Aspp = rnorm(Nspp, Ameanspp, Asigmaspp)
+Bspp = rnorm(Nspp, Bmeanspp, Bsigmaspp)
+sppID = 1:Nspp
+parameterdf = data.frame(cbind(Aspp, Bspp, sppID))
+
+#Simulate latitudes
+#first: pick a random latitude intercept for each species, based on a uniform distribution
+parameterdf$speciesAvgLats = runif(Nspp, 0, 90)
+parameterdf$speciesRangeSize = rexp(Nspp, rate = 0.1) #this will be important later -- the range is ~4x the SD for a normal distribution
+
+#Create a vector of species IDs, equal representation of species for now
+#include an empty column for individual latitudes
+data = data.frame(rep(1:Nspp, N/Nspp), rep(NA, N))
+colnames(data) = c("sppID", "individualLat")
+
+#this for-loop will fill the latitude at which each individual was measured
+#this latitude will be drawn from a normal distribution with mu = average latitude for that species and sigma = range for that species / 4
+for (i in 1:N){
+  data$individualLat[i] = rtruncnorm(n = 1, a = 0, b = 90,
+                        mean = parameterdf$speciesAvgLats[parameterdf$sppID == data$sppID[i]],
+                        sd = parameterdf$speciesRangeSize[parameterdf$sppID == data$sppID[i]]/4)
+}
+
+data = left_join(data, parameterdf, by = "sppID")
+
+#after some fiddling, I believe that species latitudes should be centered on 0, otherwise the tooth length estimates are going to be totally wack. so individual lats will be regard to the species distribution. positive = closer to poles, negative = closer to equator
+data$centeredLat = data$individualLat - data$speciesAvgLats
+
+#now simulate ypred
+data$ypred = data$Aspp + data$Bspp*data$centeredLat
+data$yobs = rnorm(N, data$ypred, sigmay)
+
+```
+
+Now we have some data simulated, we'll try to fit a model to it using Stan. I first tried this in rstanarm, but have been finding that the Stan models are much faster on my computer.
+
+```{r, fit model to simulated data, results = FALSE, message=FALSE, warning=FALSE}
+
+data_for_stan_simulated <- list(
+  N = N,
+  Nspp = Nspp,
+  CsupL = data$yobs,
+  sppID = data$sppID,
+  centered_latitude = data$centeredLat
+)
+
+fitStanSim <- stan("homework2.stan", 
+                   data=data_for_stan_simulated, 
+                   iter=2000, 
+                   chains=4, 
+                   cores = 4, 
+                   seed=377)
+
+```
+Let's quickly check some model parameters to make sure everything really did converge properly, and that we can trust the model results.
+```{r, model checks}
+hist(summary(fitStanSim)$summary[, "Rhat"])
+hist(summary(fitStanSim)$summary[, "n_eff"])
+min(summary(fitStanSim)$summary[, "n_eff"])
+traceplot(fitStanSim) #print just the first 10 traceplots
+```
+All Rhat values are between 0.999 and 1.001 (good!)
+Pretty good distribution of Neff values as well--many of these are actually higher than the number of posterior draws we took (4000), which means the model is taking draws that are "better than independent." The minimum Neff value is 1180, which is still quite good. The traceplots also look good, so I think the chains are sampling and mixing pretty well. As a side note, the traceplot() function is super cool! You can set it to inc_warmup = TRUE to see the chain behavior as it's "finding" the good likelihood space. This model finds it really quickly!
+
+Global intercept and slope intercepts look good, but let's quickly check that the model is able to return the species-specific slopes and intercepts that we gave it, by plotting them.
+
+```{r, compare model estimates to input parameters}
+#grab predicted intercepts and slopes from model summary
+Aspp_predicted = summary(fitStanSim)$summary[grep("Aspp", rownames(summary(fitStanSim)$summary)), c("mean", "2.5%", "97.5%")]
+colnames(Aspp_predicted) = c("Aspp_predicted", "Aspp2.5", "Aspp97.5")
+Bspp_predicted = summary(fitStanSim)$summary[grep("Bspp", rownames(summary(fitStanSim)$summary)), c("mean", "2.5%", "97.5%")]
+colnames(Bspp_predicted) = c("Bspp_predicted", "Bspp2.5", "Bspp97.5")
+
+#make a dataframe with true intercepts/slopes + fitted interceps/slopes
+compare = cbind(parameterdf, Aspp_predicted, Bspp_predicted)
+
+#plot intercept estimates against intercept parameters
+ggplot(compare, aes(x = Aspp, y = Aspp_predicted)) +
+  geom_point() +
+  geom_errorbar(aes(ymin=Aspp2.5, ymax=Aspp97.5), width=.2,
+                 position=position_dodge(.9)) +
+  geom_abline(slope = 1) +
+  theme_minimal()
+
+#plot slope estimates against slope parameters (no error bars)
+ggplot(compare, aes(x = Bspp, y = Bspp_predicted)) +
+  geom_point() +
+  geom_abline(slope = 1) +
+  theme_minimal()
+
+#plot slope estimates against slope parameters (with error bars)
+ggplot(compare, aes(x = Bspp, y = Bspp_predicted)) +
+  geom_point() +
+  geom_errorbar(aes(ymin=Bspp2.5, ymax=Bspp97.5), width=.01,
+                 position=position_dodge(.9)) +
+  geom_abline(slope = 1) +
+  theme_minimal()
+
+```
+Definitely a lot more spread in the slope estimates than the intercept estimates!! I believe this is because the distribution I drew slopes from was wider (e.g., Bsigmaspp was half of Bmeanspp, whereas Asigmaspp was only 1/5 of Ameanspp) and sigmay (0.1) is much larger in comparison to Bspp than to Aspp (basically--the slopes are harder to fit because they are very small?). But I'm content that the model is doing what I want it to.
+
+Finally, let's run some posterior predictive checks (retrodictive checks) on the model outputs, to make sure that our posterior is able to return a response distribution that looks similar to the data we used to fit the model.
+
+```{r, run retrodictive checks}
+#got a little help from our friend chatgpt with this code
+#added a "generated quantities" block to the stan code (also with help from chatgpt) to create "new observations" e.g., yrep
+#the output looks very similar to every density overlay I've ever generated in brms, so my assumption is that chatgpt was in fact correct with it's suggestion to this. Will be keen to chat over this in class to make sure I implemented in properly.
+
+y_rep <- extract(fitStanSim, pars = "y_rep")$y_rep
+pp_check(data_for_stan_simulated$CsupL, yrep = y_rep, fun = "dens_overlay")
+
+```
+Well that certainly took a lot more fiddling than pp_check in brms/rstanarm, but I guess this is all built in to their functions for retrodictive checks (and the generated quantities block is automatically included in their stan code?)
+
+But the model seems to be producing data that is a good fit to the simulated data, so I would call this a success!
+
+Now let's run the model on the empirical data! 
+
+```{r, fit empirical models, results = FALSE, message=FALSE, warning=FALSE}
+
+#first, take absolute value and center latitudes
+centered = complete_teeth %>%
+  group_by(Species) %>%
+  mutate(centered_latitude = abs(Lat) - mean(abs(Lat), na.rm = TRUE))
+
+#then remove species with fewer than 10 observations
+cleaned = centered %>% 
+  group_by(Species) %>%
+  filter(n() > 10)
+
+sppID = cleaned %>% 
+  ungroup() %>%
+  distinct(Species) %>% 
+  mutate(sppID = row_number())
+cleaned = left_join(cleaned, sppID, by = "Species")
+
+#then fit the same model as above, but with slightly different data list
+data_for_stan_empirical <- list(
+  N = dim(cleaned)[1],
+  Nspp = length(unique(cleaned$Species)),
+  CsupL = cleaned$CsupL,
+  sppID = cleaned$sppID,
+  centered_latitude = cleaned$centered_latitude
+)
+
+fitStanEmpiricalNoYrep <- stan("homework2_noyrep.stan", 
+                         data=data_for_stan_empirical, 
+                         iter=2000, 
+                         chains=4, 
+                         cores = 4, 
+                         seed=377)
+```
+Runs SO much faster than rstanarm. I'm almost suspicious...
+
+Let's check the histograms for Rhat and Neff, plus generate some traceplots as we did before. Basically identical code to above, but I run into an issue which is that by including ypred as a transformed parameter, and y_rep as a generated quantity, my model summary becomes absolutely massive (and I'm not able to manipulate it in any way because my computer isn't that powerful). So I re-ran the code above WITHOUT the generated quantities block to make it less computationally intensive?
+
+```{r, model checks for empirical model}
+hist(summary(fitStanEmpiricalNoYrep)$summary[, "Rhat"])
+hist(summary(fitStanEmpiricalNoYrep)$summary[, "n_eff"])
+min(summary(fitStanEmpiricalNoYrep)$summary[, "n_eff"])
+traceplot(fitStanEmpiricalNoYrep) #print just the first 10 traceplots
+
+```
+
+These all look good (Rhat close to 1.00, Neff > 10% of iterations, traceplots very fuzzy). The Neff estimates are actually suspiciously good--I don't have time now, but may eventually follow up on your suggestion to check with the Stan forums RE "how good is too good" for Neff. Hopefully not a model issue!
+
+Unfortunately we can't check the true slopes vs estimated slopes because we don't know the true slopes (haha), so I'll move straight to the retrodictive checks...
+
+I actually can't get this code to run because the stanfit object is so large when I include the y_reps. Maybe if I had more time it would eventually run. I also can't get shinystan to show me the posterior predictive checks quickly. I will submit my code as I'm already late, but keep trying to see if I can get those to work!
+```{r, retrodictive checks on empirical model}
+#commenting this code out so that my document will compile, but this is what it would look like
+#'fitStanEmpirical' is the same version of the model I used above, but including the generated quantities block
+
+# y_rep <- extract(fitStanEmpirical, pars = "y_rep")$y_rep
+# pp_check(data_for_stan_empirical$CsupL, yrep = y_rep, fun = "dens_overlay")
+# launch_shinystan(fitStanEmpiricalNoYrep)
+```
+
+Finally I'll just plot the effect size of latitude (with slopes) so we can see if tooth size varies across the latitudinal range of carnivore species.
+
+In both figures, the vertical line represents the global mean (intercept or slope).
+
+```{r, latitude effect size on teeth}
+
+Aspp_predicted = as.data.frame(summary(fitStanEmpiricalNoYrep)$summary[grep("Aspp", rownames(summary(fitStanEmpiricalNoYrep)$summary)), c("mean", "2.5%", "97.5%")])
+colnames(Aspp_predicted) = c("Aspp_predicted", "Aspp2.5", "Aspp97.5")
+Aspp_predicted$sppID = c(1:nrow(Aspp_predicted))
+
+Bspp_predicted = as.data.frame(summary(fitStanEmpiricalNoYrep)$summary[grep("Bspp", rownames(summary(fitStanEmpiricalNoYrep)$summary)), c("mean", "2.5%", "97.5%")])
+colnames(Bspp_predicted) = c("Bspp_predicted", "Bspp2.5", "Bspp97.5")
+
+estimates = cbind(Aspp_predicted, Bspp_predicted)
+
+speciesdf = as.data.frame(cleaned[,colnames(cleaned) %in% c("Species", "sppID")])
+speciesdf = speciesdf[!duplicated(speciesdf), ]
+
+estimates = left_join(estimates, speciesdf, by = "sppID")
+
+#plot global / species level intercepts
+#the vertical line is the global intercept
+ggplot(estimates, aes(x = Aspp_predicted, y = Species)) +
+  geom_point() +
+  geom_errorbar(aes(xmin=Aspp2.5, xmax=Aspp97.5), width=.2,
+                 position=position_dodge(.9)) +
+  geom_vline(xintercept = summary(fitStanEmpiricalNoYrep)$summary[rownames(summary(fitStanEmpiricalNoYrep)$summary) == "mu_a", "mean"]) +
+  theme(axis.text.y = element_text(size = 4))
+
+
+#plot global / species level slopes
+#the vertical line is the global slope
+ggplot(estimates, aes(x = Bspp_predicted, y = Species)) +
+  geom_point() +
+  geom_errorbar(aes(xmin=Bspp2.5, xmax=Bspp97.5), width=.2,
+                 position=position_dodge(.9)) +
+  geom_vline(xintercept = summary(fitStanEmpiricalNoYrep)$summary[rownames(summary(fitStanEmpiricalNoYrep)$summary) == "mu_b", "mean"]) +
+  theme(axis.text.y = element_text(size = 4))
+
+
+```
+Upon looking at the intercepts plot, I wonder if a group intercept was the best choice. The distribution is certainly skewed (lots of small species but a few larger outliers). Allowing the intercepts to be independent might have been a better choice...
+
+Looking at the slopes--most of these are pretty close to 0, although there are a few that are not. For example, all species from genus Canis appear to have increasing tooth size as they get approach the poleward range edge. Of course these slopes could be biased if the intercepts are a bit biased, since they're covarying. For example, carnivores are larger than the average species in the dataset, which pulls the intercept lower and might cause a resulting positive bias in the slopes...
