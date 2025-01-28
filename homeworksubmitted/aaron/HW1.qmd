@@ -246,3 +246,25 @@ Increasing the variability in the dataset (doubling sigma) causes the spread of 
 # Step 4 - Review datasets
 
 I would like to work with the carnivore tooth dataset.
+
+PASTE BACK IN
+
+Interpret model
+
+{r} #\| label: Interpret-model
+
+Tax_df \<- teeth_fin %\>% distinct(family, genus, species) %\>% mutate(species = str_replace(species, " ", "\_"))
+
+# I thought there would be a global mean slope estimate?
+
+broom_tidy_mcmc(fit_lat) %\>% filter(is.na(random_effect))
+
+fit_lat %\>% get_variables() %\>% filter(!str_detect(term, " ")) %\>% pull(term) fit_lat %\>% spread_draws(b\[, group, condition\], sep = "\[, :\]")
+
+# Prepare Data for Plot
+
+plot_data \<- broom_tidy_mcmc(fit_lat) %\>% filter(term != "global_intercept") %\>% mutate(species = str_remove(random_effect, "species:")) %\>% left_join(Tax_df) %\>% arrange(family, genus, species) %\>% mutate(lower_bound = estimate - 1.96 \* std.error, upper_bound = estimate + 1.96 \* std.error) %\>% mutate(overlap0 = ifelse(lower_bound \< 0 \| upper_bound \< 0, "No", "Yes"), .by = c(species, term))
+
+# Plot
+
+plot_data %\>% filter(term == "long_abs") %\>% ggplot(aes(x = estimate, y = species)) + geom_vline(xintercept = 0, linetype = "dashed") + geom_point(size = 2, aes(color = overlap0)) + geom_errorbar(aes(xmin = lower_bound, xmax = upper_bound, color = overlap0), width = 0.2) + facet_grid(family \~ ., scales = "free_y", space = "free_y") + \# Facet by family guides(color = "none") + theme_minimal() + theme( axis.text.y = element_text(size = 8), axis.title.y = element_blank(), axis.ticks.y = element_blank(), strip.text.y = element_text(angle = 0, size = 12, face = "bold"), \# Family label size plot.margin = margin(0, 0, 0, 1) ) + labs(x = "Estimate", y = NULL)
