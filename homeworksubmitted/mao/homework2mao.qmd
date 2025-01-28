@@ -1,0 +1,294 @@
+---
+title: "Homework 2"
+author: "Mao"
+format: html
+editor: visual
+---
+
+# Carnivore teeth
+
+In this homework I am going to model the relationship between premolar length and canine length because in general I assume larger premolar tend to correlate with larger canine, but this relationship might vary depending on genus.
+
+## Develop the model
+
+```{r message=FALSE}
+rm(list=ls()) 
+options(stringsAsFactors = FALSE)
+library("truncnorm")
+library("rstan")
+```
+
+```{r engine = 'cat', engine.opts = list(file = "stancodecarnivore.stan", lang = "stan")}
+data{
+int<lower=0> N;
+int<lower=0> Ngenus;
+int genus[N];
+vector[N] premolar; 	
+real y[N];
+}
+
+parameters{
+real mu_a;
+real<lower=0> sigma_a;
+real mu_b;
+real<lower=0> sigma_b;
+real<lower=0> sigma_y; 	
+real a[Ngenus];
+real b[Ngenus];
+}
+
+transformed parameters{
+real ypred[N];
+for (i in 1:N){
+    ypred[i]=a[genus[i]]+b[genus[i]]*premolar[i];
+}
+}
+
+model{	
+b ~ normal(mu_b, sigma_b);
+a ~ normal(mu_a, sigma_a);
+y ~ normal(ypred, sigma_y);
+
+//Priors
+mu_a ~ normal(2,2);
+sigma_a ~ normal(0,0.5);
+mu_b ~ normal(0.5,0.5);
+sigma_b ~ normal(0,0.5);
+sigma_y ~ normal(0,5);
+}	
+
+```
+
+## Data simulation
+
+```{r warning=FALSE}
+
+Ngenus <- 100
+
+# Set up parameters (mostly hyper-parameters)
+alphamu <- 2
+alphasigma <- 0.5
+betamu <- 0.5
+betasigma <- 0.5
+sigmay <- 5
+
+alphaspp <- rnorm(Ngenus, alphamu, alphasigma)
+slopespp <- rnorm(Ngenus, betamu, betasigma)
+
+# Keep the parameters together to compare to model output
+paramsgiven <- c(alphamu, alphasigma, betamu, betasigma, sigmay)
+npergenus <- round(runif(Ngenus, 2, 5))
+genus <- rep(1:Ngenus, npergenus)
+N <- length(genus)
+premolar <- rep(NA, N)
+y <- rep(NA, N)
+for (i in 1:Ngenus) {
+  genus_indices <- which(genus == i)
+  n <- length(genus_indices)
+  premolar[genus_indices] <- runif(n, 1, 40)
+  ypred <- alphaspp[i] + slopespp[i] * premolar[genus_indices]
+  y[genus_indices] <- rnorm(n, mean = ypred, sd = sigmay)
+}
+
+d <- data.frame(genus = factor(genus), premolar = premolar, canine = y)
+
+# Plot the data
+par(mar=c(3,3,1,1), mgp=c(1.5,.5,0), tck=-.01)
+plot(range(premolar), range(y), type="n", xlab="Length of premolar", ylab="Length of canine",
+     bty="l", main="Test data")
+for (ge in 1:Ngenus)
+  lines(premolar[genus==ge], y[genus==ge], col="darkblue")
+```
+
+The simulated data look really messy, but I can see a trend here.
+
+```{r message = FALSE, warning=FALSE}
+fit <- stan("stancodecarnivore.stan", data=c("N","y","Ngenus","genus","premolar"), 
+            iter=1000, chains=4, seed=377)
+sumer <- summary(fit)$summary
+muparams <- sumer[grep("mu", rownames(sumer)), c("mean", "2.5%", "25%", "50%", "75%", "97.5%")]
+sigmaparams <- sumer[grep("sigma", rownames(sumer)), c("mean", "2.5%","25%", "50%", "75%", "97.5%")]
+
+paramsgiven
+muparams
+sigmaparams
+spslopes <- sumer[grep("b\\[", rownames(sumer)), "mean"]
+par(mfrow=c(1, 1))
+plot(spslopes~slopespp, xlab="Given species-level slopes", ylab="Modeled species-level slopes", col="darkblue")
+abline(0,1)
+```
+
+In general, the model works fine returning the parameters I set up.
+
+## Prior predictive checks
+
+```{r}
+par(mfrow=c(1,2))
+hist(rnorm(5000, 2,2), main="Intercept mean prior", col="lightblue")
+segments(1.5,25,5,25, lwd=5, col="darkblue")
+hist(rnorm(5000, 0.5, 0.5), main="Slope mean prior", col="lightblue")
+segments(0,25,1,25, lwd=5, col="darkblue")
+```
+
+It looks reasonable, all the possible outcomes I assumed fall within the distribution.
+
+```{r warning=FALSE}
+reps <- 12
+mu_intercept <- rnorm(reps, 2,2)
+sigma_intercept <- rtruncnorm(a=0, b=Inf, reps, 0, 0.5)
+mu_slope <- rnorm(reps, 0.5,0.5)
+sigma_slope <- rtruncnorm(a=0, b=Inf, reps, 0,0.5)
+
+par(mfrow=c(3,4))
+par(mar=c(3,3,1,1), mgp=c(1.5,.5,0), tck=-.01)
+for(i in 1:reps){
+  plot(range(premolar), range(y), xlab="Length of premolar", ylab="Length of canine",
+       xlim=c(0,50),ylim=c(0,50), type="n")
+  genus_intercept <- rnorm(Ngenus, mu_intercept[i], sigma_intercept[i])
+  genus_trend <- rnorm(Ngenus, mu_slope[i], sigma_slope[i])
+  for(ge in 1:Ngenus){
+    abline(genus_intercept[ge], genus_trend[ge], col="lightblue")
+  }
+  abline(mu_intercept[i], mu_slope[i], col="darkblue")
+}
+
+```
+
+The intercept might seem small, but I assume the length of the canine shouldn\'t be that long if the premolar wasn\'t long to begin with.
+
+## Run the model with empirical data
+
+```{r message = FALSE, warning=FALSE}
+d <- read.csv("C:/PhD/Course/2024/carnivore/carnivoreteeth.csv")
+d <- subset(d, !is.na(PM4))
+d <- subset(d, !is.na(CsupL))
+N <- nrow(d)
+y <- d$CsupL
+Ngenus <- length(unique(d$Genus))
+genus <- as.numeric(as.factor(d$Genus))
+premolar <- d$PM4
+carteethgenus <- stan("stancodecarnivore.stan", data=c("N","y","Ngenus","genus","premolar"),
+                     iter=4000, warmup=3000, chains=4, cores=4, seed=777)
+```
+
+## Posterior retrodictive checks
+
+```{r message = FALSE, warning=FALSE}
+Nreal <- nrow(d)
+yreal <- d$CsupL
+premolarreal <- d$PM4
+# First, plot the real data used in the model
+par(mfrow=c(1,2))
+par(mar=c(3,3,1,1), mgp=c(1.5,.5,0), tck=-.01)
+plot(range(premolarreal), range(yreal), type="n", xlab="Length of premolar",
+     ylab="Length of canine", bty="l", main="Empirical data")
+for (j in 1:Ngenus){
+  lines(premolarreal[genus==j], yreal[genus==j], col="pink3")
+}
+hist(yreal, xlab="Length of canine", main="Empirical data", col="pink3")
+
+
+```
+
+```{r warning=FALSE}
+# What does a similar plot look like using the model output?
+carteethgenuspost <- extract(carteethgenus) 
+# extract means for now (other ways to extract the mean)
+sigma_y <- mean(carteethgenuspost$sigma_y) 
+sigma_a <- mean(carteethgenuspost$sigma_a) 
+sigma_b <- mean(carteethgenuspost$sigma_b) 
+mu_b <- mean(carteethgenuspost$mu_b) 
+mu_a <- mean(carteethgenuspost$mu_a) 
+
+a <- rnorm(Ngenus, mean=mu_a, sd=sigma_a)
+b <- rnorm(Ngenus, mean=mu_b, sd=sigma_b)
+
+N <- Nreal
+
+ypred <- length(N) 
+for (n in 1:N){
+  g <- genus[n]
+  ypred[n] <- a[g] + b[g]*premolar[n]
+}
+y <- rnorm(N, ypred, sigma_y)
+
+par(mar=c(3,3,1,1), mgp=c(1.5,.5,0), tck=-.01)
+plot(range(premolar), range(y), type="n", xlab="Length of premolar",
+     ylab="Length of canine",
+     bty="l", main="Data from posterior means")
+for (j in 1:Ngenus)
+  lines(premolar[genus==j], y[genus==j], col="plum3")
+hist(y, xlab="Length of canine", col="plum3", main="Data from posterior means")
+```
+
+From just one draw, it looks ok.
+
+```{r message=FALSE}
+simshere <- 1000
+y.sd100 <- matrix(0, ncol=simshere, nrow=Ngenus)
+for (i in 1:simshere){
+  for (n in 1:N){
+    g <- genus[n]
+    ypred[n] <- a[g] + b[g]*premolar[n] 
+  }
+  y <- rnorm(N, ypred, sigma_y)
+  y.df <- as.data.frame(cbind(y, genus))
+  y.sd <- aggregate(y.df["y"], y.df["genus"], FUN=sd)
+  y.sd100[,i] <- y.sd[,2] 
+}
+y.sd100 <- y.sd100[rowSums(is.na(y.sd100)) != ncol(y.sd100), ]
+
+
+# and here's the real data
+real.sd <- aggregate(d["CsupL"], d[c("Country", "Genus")],
+                     FUN=sd)
+
+par(mfrow=c(1,1))
+hist(colMeans(y.sd100), col="plum3", breaks=20, xlim=c(0.4,1), 
+     main="",
+     xlab="Mean SD of response from 1000 sim. datasets (purple) versus empirical data (pink)")
+real.sd <- subset(real.sd, !is.na(CsupL))
+abline(v = mean(real.sd$CsupL), col = "pink3", lwd = 2)
+```
+
+The real data has a relatively smaller standard deviation compared to what the model suggests, but considering the scale, we might still think this is off. Even though I would expect the \'default length of the canine\' to differ among genera, let\'s try the random slope model to see if it performs better.
+
+```{r message=FALSE}
+carteethsl <- stan("stancodecarnivoresl.stan", data=c("N","Ngenus","y","genus","premolar"),
+                   iter=4000, warmup=3000, chains=4, cores=4, seed=577)
+
+# Random slopes only model:
+carteethslpost <- extract(carteethsl)
+sigma_bhsmodel <- mean(carteethslpost$sigma_b) 
+mu_bhsmodel <- mean(carteethslpost$mu_b) 
+
+ahsmodel <- colMeans(carteethslpost$a) 
+bhsmodel <- rnorm(Ngenus, mean=mu_bhsmodel, sd=sigma_bhsmodel)
+
+# extract means for now (other ways to extract the mean)
+sigma_y_hsmodel <- mean(carteethslpost$sigma_y) 
+
+# Create the data using new a and b for each of the genus, simshere times
+simshere <- 1000
+y.sd100 <- matrix(0, ncol=simshere, nrow=Ngenus)
+for (i in 1:simshere){
+  for (n in 1:N){
+    g <- genus[n]
+    ypred[n] <- ahsmodel[g] + bhsmodel[g]*premolar[n] 
+  }
+  y <- rnorm(N, ypred, sigma_y_hsmodel)
+  y.df <- as.data.frame(cbind(y, genus))
+  y.sd <- aggregate(y.df["y"], y.df["genus"], FUN=sd)
+  y.sd100[,i] <- y.sd[,2] 
+}
+y.sd100 <- y.sd100[rowSums(is.na(y.sd100)) != ncol(y.sd100), ]
+
+par(mfrow=c(1,1))
+hist(colMeans(y.sd100), col="plum3", breaks=20, xlim=c(0,1), 
+     main="",
+     xlab="Mean SD of response from 1000 sim. datasets (purple) versus empirical data (pink)")
+real.sd <- subset(real.sd, !is.na(CsupL))
+abline(v = mean(real.sd$CsupL), col = "pink3", lwd = 2)
+```
+
+It didn't change much...
