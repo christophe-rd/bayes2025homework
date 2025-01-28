@@ -22,11 +22,12 @@ library(shinystan)
 
 here()
 ```
-
+### explore empirical data
 ```{r}
 ## read empirical data
 fastswim <- read.table(here("data","fastswim.dta"), sep = "", header = TRUE, na.strings = ".")
 ```
+## simulate data and create first model
 ```{r}
 ### simulate data
 
@@ -117,7 +118,7 @@ abline(0,1)
 # sim_dat <- data.frame(species, individ, wetmass, speed, swimbeat,tailamp, ldh, pk, ak, area, perim, majaxis, breadth)
 
 ```
-
+### explore priors
 ```{r}
 par(mfrow=c(3,2))
 hist(rnorm(5000, 16,8), main="Intercept mean prior", col="lightblue")
@@ -153,7 +154,7 @@ hist(rnorm(5000,20,10), main = "response variance prior", col = "lightblue")
 # ```
 
 
-#### retrodictive checks
+#### perform retrodictive checks
 
 
 ```{r}
@@ -198,7 +199,7 @@ ppc_dens_overlay(y, y_rep[1:100, ])  # Overlay densities of observed and simulat
 ```
 
 ```{r}
-y <- fastswim$speed
+col_means <- colMeans(y_rep, na.rm = TRUE) 
 residuals <- y - col_means  # Compute residuals
 residuals <- residuals[is.finite(residuals)]  # Remove non-finite values
 
@@ -213,10 +214,10 @@ if (length(residuals) > 0) {
 ```
 
 
-
+### create model on empirical data
 
 ```{r}
-### simulate data
+### construct empirical data
 
 ### made up species codes
 #species_codes <- c("Ccon", "Easp", "Bxyz", "Pqrs", "Mnop", "Qrst", "Abcd", "Efgh", 
@@ -269,7 +270,7 @@ abline(0,1)
 
 ```
 
-
+## perform posterior predictive checks
 ```{r}
 
 posterior_samples <- extract(fit_empirical)
@@ -311,6 +312,7 @@ ppc_dens_overlay(y, y_rep[1:100, ])  # Overlay densities of observed and simulat
 
 
 ```{r}
+col_means <- colMeans(y_rep, na.rm = TRUE) 
 residuals <- y - col_means  # Compute residuals
 residuals <- residuals[is.finite(residuals)]  # Remove non-finite values
 
@@ -323,4 +325,4 @@ if (length(residuals) > 0) {
 }
 ```
 
-## I think, given the above plots, I believe we've attained a fairly good fit. Yet, our residuals are fairly large, meaning we have some unaccounted for variance. Given that we have several additional measured variables, we could go back and consider whether other predictors may be of importance. However, we have learned that mass (alone) IS a decent predictor of swimming speed. The additional variance is likely due to a number of different morphological and/or physiological variables.
+## Given the above plots, I believe we've attained a decent fit. Yet, our residuals are fairly large, meaning we have some unaccounted for variance. Given that we have several additional measured variables, we could go back and consider whether other predictors may be of importance. However, we have learned that mass (alone) IS a decent predictor of swimming speed. I think the additional variance is likely due to a number of different morphological and/or physiological variables. Therefore, I'd include some of the these vars in the next model.
