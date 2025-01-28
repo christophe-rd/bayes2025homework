@@ -1,0 +1,58 @@
+Summary
+
+The dataset I used for this homework is focused on carnivore teeth across different species. 
+Initially, my goal was to examine whether higher latitudes are associated with longer teeth. 
+However, this analysis did not reveal a significant relationship. As an alternative, I investigated
+ the relationship between PM4 (premolar length) and CsupL (canine length) across species. This analysis 
+proved meaningful, as it demonstrated how these two types of teeth co-evolve and how their relationships
+ differ across species (output: initial_model_CsupL_PM4.tiff).Because the dataset contained numerous 
+species, I eventually grouped them by families to simplify the comparisons.
+
+
+
+
+
+Step 1: Model Development
+To create the model, I started with an initial hierarchical Bayesian model (partial_pooling.stan). 
+This model accounted for partial pooling across species (or families), allowing both intercepts and 
+slopes to vary by group. I designed this model because I lacked prior knowledge about carnivore teeth 
+evolution and wanted a flexible framework to explore potential relationships.
+
+Step 2: Simulated Data and Priors Check
+I generated test data and simulated them to ensure that my model could recover known parameters.
+ These simulations demonstrated that the model worked as intended. I also performed prior predictive checks, 
+and the priors were shown to conform well to reality, offering a reasonable balance between flexibility and constraint.
+
+Step 4: Fitting the Model to Empirical Data
+I applied the model to the empirical data and analyzed the relationships between PM4 and CsupL 
+across families. The results showed good model performance, with convergence diagnostics indicating no 
+divergences, R-hat values close to 1, and high effective sample sizes.
+
+Step 5: Retrodictive (Posterior Predictive) Checks
+To assess the fit of the model to the empirical data, I performed retrodictive checks. This included both:
+
+Visualizations generated using shinystan (outputs: Shinyshan result_retrodictive.JPG and Shinyshan result_retrodictive_estimate.JPG).
+Coding posterior predictive checks in R, where I visualized the slopes and posterior predictions of ypred (outputs: PosteriorPredCheck_slope.tiff).
+The posterior predictive checks showed that the model fit the data well, and the slope comparisons provided meaningful insights into 
+how families of carnivores differ in the relationship between PM4 and CsupL.
+
+
+
+
+
+
+Notes for Uploaded Files
+
+partial_pooling.stan: Contains the hierarchical Bayesian model used in the analysis, allowing for partial pooling across species or families.
+
+Shinyshan result_retrodictive.JPG and Shinyshan result_retrodictive_estimate.JPG: Outputs from shinystan showing retrodictive checks and posterior estimates. 
+These provide an interactive visualization of posterior predictive performance.
+
+initial_model_CsupL_PM4.tiff: Visualization of the relationship between PM4 and CsupL, highlighting how these teeth co-evolve and differ across species.
+
+PosteriorPredCheck_slope.tiff: Results from coding posterior predictive checks in R, showing slopes and ypred for families and providing further validation of the model fit.
+
+Simulated Data Files (e.g., simulated_data.tiff): Outputs from the simulated data step, confirming that the model can recover set parameters and perform reliably.
+
+Other TIFF Outputs: Likely represent specific analyses or results from different stages of the workflow. These provide supplementary visualizations and diagnostics.
+
